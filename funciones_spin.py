@@ -26,14 +26,20 @@ def h_intercambio(lista_nodos, i):
 
 
 def resolver_LL(dt, H_eff, s_0):
-    I = np.zeros((3,3)) #matriz identidad
+    '''
+    Recibe un salto de tiempo, el campo magnetico
+    efectivo, y un vector de spin inicial s0.
+    Retorna la siguiente iteracion del arreglo spin,
+    precesandolo en torno al campo.
+    '''
+    I = np.zeros((3,3)) #cmatriz identidad
     I[0,0], I[1,1], I[2,2] = 1, 1, 1
     s = np.zeros((3))
     A = I - 0.5 * Lh(H_eff) * dt
     B = I + 0.5 * Lh(H_eff) * dt
     b = np.matmul(B, s_0)
     detA = det_dim3(A)
-    for j in range(0,3):
+    for j in range(3):
         Aj = reemplazo_cramer(A, b, j)
         detAj = det_dim3(Aj)
         s[j] = detAj
@@ -42,6 +48,15 @@ def resolver_LL(dt, H_eff, s_0):
 
 
 def avanzar_nodo(dt, lista_nodos, i):
+    '''
+    Recibe el valor de la grilla de nodos,
+    en un instante determinado, en una lista
+    de nodos. Avanza el nodo de indice i.
+    calculando el campo efectivo que siente
+    producto del campo externo y las interacciones
+    con sus vecinos.
+    Retorna un nuevo nodo "avanzado" un dt en la Ec de mov.
+    '''
     nodo = lista_nodos[i]
     spin = nodo.spin
     alpha = nodo.alpha
@@ -54,6 +69,11 @@ def avanzar_nodo(dt, lista_nodos, i):
     return nuevo_nodo
 
 def avanzar_grilla(dt, lista_nodos):
+    '''
+    Recibe una grilla con los nodos en un determinado
+    instante, calcula los objetos nodo en la siguiente
+    iteracion, y los retorna en una nueva lista de nodos.
+    '''
     n = len(lista_nodos)
     nueva_lista_nodos = []
     for i in range(n):
@@ -62,6 +82,15 @@ def avanzar_grilla(dt, lista_nodos):
     return nueva_lista_nodos
 
 def simular_spines(t_array, lista_nodos0):
+    '''
+    Recibe un arreglo de tiempos, y una lista
+    de nodos del instante inicial.
+    La funcion retorna una matriz de 2 dimensiones
+    conteniendo las grillas de nodos
+    en cada uno de los instantes de t_array.
+    El formato de retorno es:
+    [instante_tiempo, nodo_i]
+    '''
     n = np.size(t_array,0)
     lista_nodos = [lista_nodos0]
     for i in range(1, n):
@@ -71,6 +100,13 @@ def simular_spines(t_array, lista_nodos0):
     return lista_nodos
 
 def extraer_spines(lista_nodos):
+    '''
+    Recibe una matriz de nodos,en formato
+    [Instane_tiempo, _nodo_i] y extrae los valores
+    de los spines, en formato:
+    [Nodo_i, Instante_tiempo, componentes_spin]
+    como un arreglo de numpy.
+    '''
     n_t = len(lista_nodos)
     n_nodos = len(lista_nodos[0])
     spines = np.zeros((n_nodos, n_t, 3))
