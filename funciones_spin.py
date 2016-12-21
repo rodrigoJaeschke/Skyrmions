@@ -1,7 +1,12 @@
+# coding: utf-8
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import scipy.linalg as lin
+from matplotlib.patches import FancyArrowPatch
+from mpl_toolkits.mplot3d import proj3d
+from matplotlib import animation
 
 class Nodo_spin:
     alpha = 0.05
@@ -12,6 +17,19 @@ class Nodo_spin:
         self.spin = s
         
 
+def set_alpha(lista_nodos, alpha):
+    n_nodos = len(lista_nodos)
+    for i in range(n_nodos):
+        lista_nodos[i].alpha = alpha
+
+
+def set_H_ext(lista_nodos, H_ext):
+    n_nodos = len(lista_nodos)
+    for i in range(n_nodos):
+        lista_nodos[i].campo_externo = H_ext[i, :]
+    return lista_nodos
+
+
 def h_intercambio(lista_nodos, i):
     nodo = lista_nodos[i]
     vecinos = nodo.vecinos
@@ -21,7 +39,7 @@ def h_intercambio(lista_nodos, i):
         indice_vec = int(vecinos[j, 0])
         s_vec = lista_nodos[indice_vec].spin
         j_vec = vecinos[j, 1]
-        h = h + s_vec*j_vec
+        h = h - s_vec*j_vec
     return h
 
 
@@ -32,7 +50,7 @@ def resolver_LL(dt, H_eff, s_0):
     Retorna la siguiente iteracion del arreglo spin,
     precesandolo en torno al campo.
     '''
-    I = np.zeros((3,3)) #cmatriz identidad
+    I = np.zeros((3,3)) # matriz identidad
     I[0,0], I[1,1], I[2,2] = 1, 1, 1
     s = np.zeros((3))
     A = I - 0.5 * Lh(H_eff) * dt
@@ -63,7 +81,7 @@ def avanzar_nodo(dt, lista_nodos, i):
     h_ext = nodo.campo_externo
     h_int = h_intercambio(lista_nodos, i)
     H = h_ext + h_int
-    H_eff = - H + alpha * cruz(spin, H)
+    H_eff =  H - alpha * cruz(spin, H)
     s = resolver_LL(dt, H_eff, spin)
     nuevo_nodo = Nodo_spin(s, h_ext, nodo.vecinos)
     return nuevo_nodo
@@ -81,21 +99,31 @@ def avanzar_grilla(dt, lista_nodos):
         nueva_lista_nodos.append(nuevo_nodo)
     return nueva_lista_nodos
 
-def simular_spines(t_array, lista_nodos0):
+def simular_spines(t_array, lista_nodos0, H_ext = 0):
     '''
     Recibe un arreglo de tiempos, y una lista
     de nodos del instante inicial.
+    Además recibe como parámetro opcional un arreglo,
+    con los campos externos en cada nodo para cada tiempo,
+    ordenados en formato:
+    H_ext[indice_tiempo, indice_nodo, componente_H]
+    (arreglo de 3 dimenciones)
     La funcion retorna una matriz de 2 dimensiones
     conteniendo las grillas de nodos
     en cada uno de los instantes de t_array.
     El formato de retorno es:
     [instante_tiempo, nodo_i]
     '''
-    n = np.size(t_array,0)
+    n_t = np.size(t_array,0)
+    n_nodos = len(lista_nodos0)
+    if type(H_ext) == int:
+        H_ext = np.zeros((n_t, n_nodos, 3))
+    set_H_ext(lista_nodos0, H_ext[0])
     lista_nodos = [lista_nodos0]
-    for i in range(1, n):
+    for i in range(1, n_t):
         dt = t_array[i]- t_array[i-1]
         nueva_lista = avanzar_grilla(dt, lista_nodos[i-1])
+        set_H_ext(nueva_lista, H_ext[i, :, :])
         lista_nodos.append(nueva_lista)
     return lista_nodos
 
@@ -204,7 +232,7 @@ def Lh(h):
     Lxhx = L[0, :, :] * h[0]
     Lyhy = L[1, :, :] * h[1]
     Lzhz = L[2, :, :] * h[2]
-    return  Lxhx + Lyhy + Lzhz
+    return  -(Lxhx + Lyhy + Lzhz)
 
 
 def reemplazo_cramer(A, b, i):
@@ -242,3 +270,118 @@ def esf_to_cart(r, theta, phi):
     s_z = np.cos(theta)
     s = [s_x, s_y, s_z] * r
     return np.array(s)
+
+
+class Arrow3D(FancyArrowPatch):
+    def __init__(self, xs, ys, zs, *args, **kwargs):
+        FancyArrowPatch.__init__(self, (0, 0), (0, 0), *args, **kwargs)
+        self._verts3d = xs, ys, zs
+
+    def draw(self, renderer):
+        xs3d, ys3d, zs3d = self._verts3d
+        xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, renderer.M)
+        self.set_positions((xs[0], ys[0]), (xs[1], ys[1]))
+        FancyArrowPatch.draw(self, renderer)
+
+
+def seleccionar_color(sx, sy, sz):
+    cos_th = sz / np.sqrt(sx ** 2 + sy ** 2 + sz ** 2)
+    if cos_th > 0.7:
+        return (0.95, 0, 0)
+    elif cos_th > 0.4:
+        return (0.8, 0.8, 0.0)
+    elif cos_th > 0.125:
+        return (0.6, 1, 0.1)
+    elif cos_th > -0.125:
+        return (0.1, 0.8, 0.4)
+    elif cos_th > -0.4:
+        return (0.2, 0.7, 0.9)
+    elif cos_th > -0.7:
+        return (0, 0.00, 1)
+    else:
+        return (0.5, 0.00, 1)
+
+def plotear_instante_grilla(spines, indice_t, posiciones, fig):
+    '''
+    Recibe una matriz con spines en formato
+    [Nodo_i, intante_tiempo, componente_spin]
+    y grafica la grilla en un instante indice_t, 
+    (debe ser un entero) graficando los spines como
+    flechas de norma 1, que parten en
+    las posiciones de los nodos.
+    
+    Las posiciones se ingresan en un arreglo 2d de formato:
+    [nodo_i, componente_pos] y las componentes son
+    bidimensionales (nodos viven en un plano).
+    
+    Se debe ingresar tambien un objeto figure en el que se
+    ploteara la grilla de nodos.
+    '''
+    grilla_en_t = spines[:, indice_t, :]
+    n_nodos = np.size(grilla_en_t, 0)
+    
+    ax = fig.add_subplot(111, projection='3d')
+    x_min, x_max = np.min(posiciones[:, 0]) -1.1, np.max(posiciones[:, 0]) +1.1
+    y_min, y_max = np.min(posiciones[:, 1]) -1.1, np.max(posiciones[:, 1]) +1.1
+    altura_plot = (x_max - x_min) / 2
+    z_min, z_max = -altura_plot, altura_plot
+    ax.set_xlim([x_min, x_max])
+    ax.set_ylim([y_min, y_max])
+    ax.set_zlim([z_min, z_max])
+    n_lineas = 10
+    sep_lineas = 2
+    x = np.linspace(x_min, x_max, n_lineas)
+    y = np.linspace(y_min, y_max, n_lineas)
+    X, Y = np.meshgrid(x, y)
+    Z = np.zeros((n_lineas, n_lineas))
+    ax.plot_wireframe(X, Y, Z, rstride=sep_lineas, cstride=sep_lineas)
+    ax.azim = 80
+    ax.elev = 60
+    for i in range(n_nodos):
+        x0 = posiciones[i, 0]
+        y0 = posiciones[i, 1]
+        z0 = 0
+        sx, sy, sz = grilla_en_t[i, 0], grilla_en_t[i, 1], grilla_en_t[i, 2]
+        xf = x0 + sx
+        yf = y0 + sy
+        zf = z0 + sz
+        color = seleccionar_color(sx, sy, sz)
+        arrow = Arrow3D([x0, xf], [y0, yf], [z0, zf], mutation_scale=10, lw=3, arrowstyle="-|>", color=color)
+        ax.add_artist(arrow)
+        ax.plot([x0], [y0], [z0], '.', color=(0, 0, 0), markersize=13)
+    ax.set_xlabel('$X$')
+    ax.set_ylabel('$Y$')
+    ax.set_zlabel('$Z$')
+    plt.show()
+
+
+
+def guardar_spines(spines, posiciones):
+    spines_x = spines[:, :, 0]
+    spines_y = spines[:, :, 1]
+    spines_z = spines[:, :, 2]
+    np.savetxt('arreglos/spines_x.dat', spines_x)
+    np.savetxt('arreglos/spines_y.dat', spines_y)
+    np.savetxt('arreglos/spines_z.dat', spines_z)
+    pos_x = posiciones[:, 0]
+    pos_y = posiciones[:, 1]
+    np.savetxt('arreglos/pos_x.dat', pos_x)
+    np.savetxt('arreglos/pos_y.dat', pos_y)
+
+    
+def cargar_spines():
+    spines_x = np.loadtxt('arreglos/spines_x.dat')
+    spines_y = np.loadtxt('arreglos/spines_y.dat')
+    spines_z = np.loadtxt('arreglos/spines_x.dat')
+    n_nodos, n_t = np.shape(spines_x)
+    spines = np.zeros((n_nodos, n_t, 3))
+    spines[:, :, 0] = spines_x
+    spines[:, :, 1] = spines_y
+    spines[:, :, 2] = spines_z
+
+    pos_x = np.loadtxt('arreglos/pos_x.dat')
+    pos_y = np.loadtxt('arreglos/pos_y.dat')
+    posiciones = np.zeros((n_nodos, 2))
+    posiciones[:, 0] = pos_x
+    posiciones[:, 1] = pos_y
+    return spines, posiciones
