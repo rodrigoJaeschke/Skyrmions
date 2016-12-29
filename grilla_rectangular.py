@@ -2,7 +2,7 @@
 from __future__ import division
 import numpy as np
 import funciones_spin as sp
-from scipy.fftpack import fft, fftfreq
+from scipy.fftpack import fft, fftfreq, fft2, fftshift
 import random as rand
 
 def iniciar_grilla_rectangular(nx, ny, j, modo='aleatorio'):
@@ -21,7 +21,7 @@ def iniciar_grilla_rectangular(nx, ny, j, modo='aleatorio'):
 	return lista_nodos, posiciones
 	'''
 	H_ext = 0
-	separacion = 2
+	separacion = 1
 	x = np.linspace(0, (nx - 1) * separacion, nx)
 	y = np.linspace(0, (ny - 1) * separacion, ny)
 	X, Y = np.meshgrid(x, y)
@@ -43,15 +43,16 @@ def iniciar_grilla_rectangular(nx, ny, j, modo='aleatorio'):
 
 
 def perturbacion(epsilon):
-	ds_x = rand.random() * epsilon
-	ds_y = rand.random() * epsilon
-	ds_z = rand.random() * epsilon
+	ds_x = (rand.random() - 0.5) * epsilon 
+	ds_y = (rand.random() - 0.5) * epsilon
+	ds_z = (rand.random() - 0.5) * epsilon
 	ds = np.array([ds_x, ds_y, ds_z])
 	return ds
 
 
-def equilibrio_rectangular(nx, ny, j, s_eq=np.array([0, 0, 1]), epsilon=0.1):
+def equilibrio_rectangular(nx, ny, j, s_eq=np.array([3, 1, 3]), epsilon=0.001):
 	cond_inicial = np.zeros((nx * ny, 3))
+	s_eq = sp.normalizar(s_eq)
 	for k in range(nx):
 		for l in range(ny):
 			i = indice_grilla_rectangular(nx, k, l)
@@ -182,18 +183,17 @@ def dif_media_listas_nodos(lista_nodos_1, lista_nodos_2):
 	return dif_media
 
 
-def H_sinusoidal(x, y, t, A=2, k=np.array([10, 0, 0]), w = 10, fase=0):
+def H_sinusoidal(x, y, t, A=2, k=np.array([10, 0, 0]), w = 10, fase=0, h_unitario=np.array([0, 0, 1])):
 	'''
 	'''
+	h_unitario = sp.normalizar(h_unitario)
 	h = A * np.sin(k[0] * x + k[1] * y - w * t - fase)
 	modulo_k = sp.norma(k)
-	hx = h * k[0] / modulo_k
-	hy = h * k[1] / modulo_k
-	hz = h * k[2] / modulo_k
-	return np.array([hx, hy, hz])
+	
+	return h_unitario * h
 
 
-def generar_arreglo_H(posiciones, t_array, A=2, k=np.array([10, 0, 0]), w = 10, fase=0):
+def generar_arreglo_H(posiciones, t_array, A=2, k=np.array([10, 0, 0]), w = 10, fase=0, h_unitario=np.array([0, 0, 1])):
 	'''
 	'''
 	n_nodos = np.size(posiciones, 0)
@@ -204,24 +204,24 @@ def generar_arreglo_H(posiciones, t_array, A=2, k=np.array([10, 0, 0]), w = 10, 
 			x = posiciones[j, 0]
 			y = posiciones[j, 1]
 			t = t_array[i]
-			H_ext[i, j, :] = H_sinusoidal(x, y, t,  A=2, k=np.array([10, 0, 0]), w = 10, fase=0)
+			H_ext[i, j, :] = H_sinusoidal(x, y, t,  A=A, k=k, w = w, fase=fase, h_unitario=h_unitario)
 	return H_ext
 
 
 
 def extraer_fila(spines, nx, ny, j): 
-	fila_spines = np.zeros((nx, 3))
+	fila_spines = np.zeros((nx, 3), dtype=complex)
 	indices=[]
 	for i in range(nx):
 		indice = indice_grilla_rectangular(nx, i, j)
 		indices.append(indice)
-		fila_spines[i, :] = spines[indice, :]
+		fila_spines[indice, :] = spines[indice, :]
 	return fila_spines, indices
 
 
 
 def extraer_columna(spines, nx, ny, i):
-	columna_spines = np.zeros((ny, 3))
+	columna_spines = np.zeros((ny, 3), dtype=complex)
 	indices = []
 	for j in range(ny):
 		indice = indice_grilla_rectangular(nx, i, j)
@@ -230,40 +230,122 @@ def extraer_columna(spines, nx, ny, i):
 	return columna_spines, indices
 
 
-def reemplazar_elementos(spines, spines_reemplazo, indices):
+def reemplazar_elementos(arreglo, elementos_reemplazo, indices):
 	n = len(indices)
 	for i in range(n):
-		spines[indices[i]] = spines_reemplazo[i]
-	return spines
+		arreglo[indices[i]] = elementos_reemplazo[i]
+	return arreglo
 
-
+'''
 def ft_gr_instante(spines, posiciones, nx, ny, d):
-	ft_spines = np.zeros_like(spines)
+	ft_spines = np.zeros_like(spines, dtype=complex)
 	ft_spines[:, :] = spines[:, :] 
 	momentos = np.zeros_like(posiciones)
+		
 	for j in range(ny):
 		# Transformar fila j.
 		fila_spines, indices = extraer_fila(ft_spines, nx, ny, j)
-		ft_fila_spines = np.zeros_like(fila_spines)
-		fila_kx= fftfreq(nx, d)
+		ft_fila_spines = np.zeros_like(fila_spines, dtype=complex)
+		fila_kx = 2 * np.pi * fftfreq(nx, d)
 		for k in range(3):
-			ft_fila_spines[:, k] = np.abs(fft(fila_spines[:, k])) / nx
-
+			ft_fila_spines[:, k] = fft(fila_spines[:, k]) / nx
 		ft_spines = reemplazar_elementos(ft_spines, ft_fila_spines, indices)
 		momentos[:, 0] = reemplazar_elementos(momentos[:, 0], fila_kx, indices)
-
+		#print 'y=' + str(j), indices
+		#print momentos
+	
 	for i in range(nx):
 		# Transformar columna i
-		columna_spines, indices = extraer_columna(ft_spines, nx, ny, j)
-		ft_columna_spines = np.zeros_like(columna_spines)
-		columna_ky = fftfreq(ny, d)
+		columna_spines, indices = extraer_columna(ft_spines, nx, ny, i)
+		ft_columna_spines = np.zeros_like(columna_spines, dtype=complex)
+		columna_ky = 2 * np.pi * fftfreq(ny, d)
 		for k in range(3):
-			ft_columna_spines[k, :] = np.abs(fft(columna_spines[k, :])) / ny
+			ft_columna_spines[:, k] = fft(columna_spines[:, k]) / ny
 		ft_spines = reemplazar_elementos(ft_spines, ft_columna_spines, indices)
 		momentos[:, 1] = reemplazar_elementos(momentos[:, 1], columna_ky, indices)
+		#print 'x='+str(i), indices
+		#print momentos
 
-	return ft_spines, momentos
+	#momentos[:, 1] = posiciones[:, 1]
+	return np.abs(ft_spines), momentos
+
+
+'''
+
+
+def grilla_spines_instante(spines, nx, ny):
+	grilla_spines = np.zeros((nx, ny, 3))
+	for i in range(nx):
+		for j in range(ny):
+			indice_nodo = indice_grilla_rectangular(nx, i, j)
+			grilla_spines[j, i, :] = spines[indice_nodo, :]
+	return grilla_spines
+
+
+def ft_gr_instante(spines, nx, ny, d):
+	grilla_spines = grilla_spines_instante(spines, nx, ny)
+	ft_spines = np.zeros_like(grilla_spines)
+	for i in range(3):
+		modulo_ft = np.abs(fft2(grilla_spines[:, :, i]))
+		ft_spines[:, :, i] = fftshift(modulo_ft)
+	if not(is_odd(nx)):
+		ft_spines = ft_spines[1:,:,:]
+	if not(is_odd(ny)):
+		ft_spines = ft_spines[:, 1:, :]
+	return ft_spines
+
+def is_odd(num):
+    return num & 0x1
+
+
+def onda_spin_sinusoidal(x, y, k=np.array([1, 1, 0])):
+	arg = k[0] * x + k[1] * y
+	sx = np.cos(arg)
+	sy = np.sin(arg)
+	sz = 0
+	return np.array([sx, sy, sz])
+
+
+def grilla_onda_spin(lista_nodos, posiciones, nx, ny, k):
+	for i in range(nx):
+		for j in range(ny):
+			indice_nodo = indice_grilla_rectangular(nx, i, j)
+			[x, y] = posiciones[indice_nodo, :]
+			s = onda_spin_sinusoidal(x, y, k=k)
+			lista_nodos[indice_nodo].spin = s
+	return lista_nodos
 
 
 
+ 
 
+
+def recuperar_grilla_momentos(nx, ny, d=1.0):
+	kx = 2 * np.pi * fftfreq(nx, d)
+	ky = 2 * np.pi * fftfreq(ny, d)
+	kx = fftshift(kx)
+	ky = fftshift(ky)
+	grilla_momentos = np.zeros((nx, ny, 2))
+	for i in range(nx):
+		for j in range(ny):
+			grilla_momentos[i, j, :] = [kx[i], ky[j]]
+	if not(is_odd(nx)):
+		grilla_momentos = grilla_momentos[1:,:,:]
+	if not(is_odd(ny)):
+		grilla_momentos = grilla_momentos[:, 1:, :]
+	return grilla_momentos
+
+
+
+'''
+def grilla_fourier(ft_spines, momentos, nx, ny, d=1.0):
+	kx_array, ky_array = recuperar_frec_ordenadas(nx, ny, d=d)
+	grilla_ft_spines = np.zeros((nx, ny, 3))
+	for indice_nodo in range(nx * ny):
+		[kx, ky] = momentos[indice_nodo, :]
+		i = np.argmin(np.abs(kx_array - kx))
+		j = np.argmin(np.abs(ky_array - ky))
+		grilla_ft_spines[i, j, :] = ft_spines[indice_nodo, :] 
+	return grilla_ft_spines
+
+'''

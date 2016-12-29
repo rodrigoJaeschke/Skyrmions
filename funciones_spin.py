@@ -9,7 +9,7 @@ from mpl_toolkits.mplot3d import proj3d
 from matplotlib import animation
 
 class Nodo_spin:
-    alpha = 0.05
+    alpha = 0.5
     
     def __init__(self, s, H,  vecinos):
         self.campo_externo = H
@@ -348,11 +348,10 @@ def plotear_instante_grilla(spines, indice_t, posiciones, fig):
         color = seleccionar_color(sx, sy, sz)
         arrow = Arrow3D([x0, xf], [y0, yf], [z0, zf], mutation_scale=10, lw=3, arrowstyle="-|>", color=color)
         ax.add_artist(arrow)
-        ax.plot([x0], [y0], [z0], '.', color=(0, 0, 0), markersize=13)
+        ax.plot([x0], [y0], [z0], '.', color=(0, 0, 0), markersize=5)
     ax.set_xlabel('$X$')
     ax.set_ylabel('$Y$')
     ax.set_zlabel('$Z$')
-    plt.show()
 
 
 
