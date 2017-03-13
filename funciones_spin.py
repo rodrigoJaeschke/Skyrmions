@@ -8,8 +8,11 @@ from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
 from matplotlib import animation
 
+import grilla_rectangular as gr
+
+
 class Nodo_spin:
-    alpha = 0.5
+    alpha = 0.1
     
     def __init__(self, s, H,  vecinos):
         self.campo_externo = H
@@ -34,13 +37,62 @@ def h_intercambio(lista_nodos, i):
     nodo = lista_nodos[i]
     vecinos = nodo.vecinos
     n_vec = np.size(vecinos, 0)
+    s_vec = np.zeros(3)
     h = np.zeros((3))
     for j in range(n_vec):
         indice_vec = int(vecinos[j, 0])
-        s_vec = lista_nodos[indice_vec].spin
+        s_vec[:] = lista_nodos[indice_vec].spin[:]
         j_vec = vecinos[j, 1]
         h = h - s_vec*j_vec
     return h
+
+
+def h_anisotropia(lista_nodos, i, A):
+    nodo = lista_nodos[i]
+    spin = nodo.spin
+    h = 2 * A * np.array([0, 0, spin[2]])
+    return h
+
+
+
+
+
+
+
+def h_dmi(lista_nodos, i):
+    nodo = lista_nodos[i]
+    vecinos = nodo.vecinos
+    n_vec = np.size(vecinos, 0)
+    h = np.zeros(3)
+    s_vec = np.zeros(3)
+    for j in range(n_vec):
+        indice_vec = int(vecinos[j, 0])
+        s_vec[:] = lista_nodos[indice_vec].spin[:]
+        D_ij = vecinos[j, 2:5]
+        
+        h = h + np.cross(D_ij, s_vec)
+        '''
+        if i==4:
+            posiciones = np.array([[ 0., 0. ],
+             [ 1.,          0.        ],
+             [ 2. ,         0.        ],
+             [ 0.5 ,        0.8660254 ],
+             [ 1.5  ,       0.8660254 ],
+             [ 2.5   ,      0.8660254 ],
+             [ 1.     ,     1.73205081],
+             [ 2.      ,    1.73205081],
+             [ 3.       ,   1.73205081]])
+            fig = plt.figure(1)
+            ax = gr.plotear_grilla_con_dmi([lista_nodos], posiciones, i, j, fig)
+            x0, y0 = posiciones[i, 0], posiciones[i, 1]
+            arrow = Arrow3D([x0, x0+h[0]], [y0, y0+h[1]], [0, h[2]], mutation_scale=10, lw=3, arrowstyle="-|>", color='green')
+            ax.add_artist(arrow)
+            plt.show()
+        '''
+    return h
+
+
+
 
 
 def resolver_LL(dt, H_eff, s_0):
@@ -65,7 +117,7 @@ def resolver_LL(dt, H_eff, s_0):
     return s
 
 
-def avanzar_nodo(dt, lista_nodos, i):
+def avanzar_nodo(dt, lista_nodos, i, A):
     '''
     Recibe el valor de la grilla de nodos,
     en un instante determinado, en una lista
@@ -80,13 +132,16 @@ def avanzar_nodo(dt, lista_nodos, i):
     alpha = nodo.alpha
     h_ext = nodo.campo_externo
     h_int = h_intercambio(lista_nodos, i)
-    H = h_ext + h_int
+    h_dm = h_dmi(lista_nodos, i)
+    h_ani = h_anisotropia(lista_nodos, i, A)
+    H = h_ext + h_int + h_dm + h_ani
+    #print 'campo efectivo nodo: '+ str(i), norma(H)
     H_eff =  H - alpha * cruz(spin, H)
     s = resolver_LL(dt, H_eff, spin)
     nuevo_nodo = Nodo_spin(s, h_ext, nodo.vecinos)
     return nuevo_nodo
 
-def avanzar_grilla(dt, lista_nodos):
+def avanzar_grilla(dt, lista_nodos, A):
     '''
     Recibe una grilla con los nodos en un determinado
     instante, calcula los objetos nodo en la siguiente
@@ -95,11 +150,11 @@ def avanzar_grilla(dt, lista_nodos):
     n = len(lista_nodos)
     nueva_lista_nodos = []
     for i in range(n):
-        nuevo_nodo = avanzar_nodo(dt, lista_nodos, i)
+        nuevo_nodo = avanzar_nodo(dt, lista_nodos, i, A)
         nueva_lista_nodos.append(nuevo_nodo)
     return nueva_lista_nodos
 
-def simular_spines(t_array, lista_nodos0, H_ext = 0):
+def simular_spines(t_array, lista_nodos0, H_ext = 0, A=0):
     '''
     Recibe un arreglo de tiempos, y una lista
     de nodos del instante inicial.
@@ -122,7 +177,7 @@ def simular_spines(t_array, lista_nodos0, H_ext = 0):
     lista_nodos = [lista_nodos0]
     for i in range(1, n_t):
         dt = t_array[i]- t_array[i-1]
-        nueva_lista = avanzar_grilla(dt, lista_nodos[i-1])
+        nueva_lista = avanzar_grilla(dt, lista_nodos[i-1], A)
         set_H_ext(nueva_lista, H_ext[i, :, :])
         lista_nodos.append(nueva_lista)
     return lista_nodos
@@ -301,7 +356,7 @@ def seleccionar_color(sx, sy, sz):
     else:
         return (0.5, 0.00, 1)
 
-def plotear_instante_grilla(spines, indice_t, posiciones, fig):
+def plotear_instante_grilla(spines, indice_t, posiciones, fig, show=False, mask=0):
     '''
     Recibe una matriz con spines en formato
     [Nodo_i, intante_tiempo, componente_spin]
@@ -317,9 +372,16 @@ def plotear_instante_grilla(spines, indice_t, posiciones, fig):
     Se debe ingresar tambien un objeto figure en el que se
     ploteara la grilla de nodos.
     '''
+
+
     grilla_en_t = spines[:, indice_t, :]
     n_nodos = np.size(grilla_en_t, 0)
-    
+
+    if type(mask)==int and mask==0:
+        mask = range(n_nodos)
+    n_nodos = len(mask)
+    grilla_en_t = grilla_en_t[mask]
+    posiciones = posiciones[mask]
     ax = fig.add_subplot(111, projection='3d')
     x_min, x_max = np.min(posiciones[:, 0]) -1.1, np.max(posiciones[:, 0]) +1.1
     y_min, y_max = np.min(posiciones[:, 1]) -1.1, np.max(posiciones[:, 1]) +1.1
@@ -335,52 +397,153 @@ def plotear_instante_grilla(spines, indice_t, posiciones, fig):
     X, Y = np.meshgrid(x, y)
     Z = np.zeros((n_lineas, n_lineas))
     ax.plot_wireframe(X, Y, Z, rstride=sep_lineas, cstride=sep_lineas)
-    ax.azim = 80
-    ax.elev = 60
+    ax.azim = 60
+    ax.elev = 30
     for i in range(n_nodos):
         x0 = posiciones[i, 0]
         y0 = posiciones[i, 1]
         z0 = 0
         sx, sy, sz = grilla_en_t[i, 0], grilla_en_t[i, 1], grilla_en_t[i, 2]
-        xf = x0 + sx
-        yf = y0 + sy
-        zf = z0 + sz
+        factor = 1.5
+        xf = x0 + factor * sx
+        yf = y0 + factor * sy
+        zf = z0 + factor * sz
         color = seleccionar_color(sx, sy, sz)
         arrow = Arrow3D([x0, xf], [y0, yf], [z0, zf], mutation_scale=10, lw=3, arrowstyle="-|>", color=color)
         ax.add_artist(arrow)
-        ax.plot([x0], [y0], [z0], '.', color=(0, 0, 0), markersize=5)
+        ax.plot([x0], [y0], [z0], '.', color='black', markersize=7)
     ax.set_xlabel('$X$')
     ax.set_ylabel('$Y$')
     ax.set_zlabel('$Z$')
+    if show==True:
+        plt.show()
+    return ax
 
 
 
-def guardar_spines(spines, posiciones):
+def guardar_spines(spines, posiciones, default=True, carpeta=''):
     spines_x = spines[:, :, 0]
     spines_y = spines[:, :, 1]
     spines_z = spines[:, :, 2]
-    np.savetxt('arreglos/spines_x.dat', spines_x)
-    np.savetxt('arreglos/spines_y.dat', spines_y)
-    np.savetxt('arreglos/spines_z.dat', spines_z)
     pos_x = posiciones[:, 0]
     pos_y = posiciones[:, 1]
-    np.savetxt('arreglos/pos_x.dat', pos_x)
-    np.savetxt('arreglos/pos_y.dat', pos_y)
 
+    if default:
+        destino = 'arreglos/'
+    else:
+        destino = 'arreglos/'+carpeta+'/'
+    np.savetxt(destino + 'spines_x.dat', spines_x)
+    np.savetxt(destino + 'spines_y.dat', spines_y)
+    np.savetxt(destino + 'spines_z.dat', spines_z)
     
-def cargar_spines():
-    spines_x = np.loadtxt('arreglos/spines_x.dat')
-    spines_y = np.loadtxt('arreglos/spines_y.dat')
-    spines_z = np.loadtxt('arreglos/spines_x.dat')
+    np.savetxt(destino + 'pos_x.dat', pos_x)
+    np.savetxt(destino + 'pos_y.dat', pos_y)
+    
+
+def cargar_spines(default=True, carpeta=''):
+    if default:
+        destino = 'arreglos/'
+    else:
+        destino = 'arreglos/' + carpeta + '/'
+    spines_x = np.loadtxt(destino + 'spines_x.dat')
+    spines_y = np.loadtxt(destino + 'spines_y.dat')
+    spines_z = np.loadtxt(destino + 'spines_z.dat')
     n_nodos, n_t = np.shape(spines_x)
     spines = np.zeros((n_nodos, n_t, 3))
     spines[:, :, 0] = spines_x
     spines[:, :, 1] = spines_y
     spines[:, :, 2] = spines_z
 
-    pos_x = np.loadtxt('arreglos/pos_x.dat')
-    pos_y = np.loadtxt('arreglos/pos_y.dat')
+    pos_x = np.loadtxt(destino + 'pos_x.dat')
+    pos_y = np.loadtxt(destino + 'pos_y.dat')
     posiciones = np.zeros((n_nodos, 2))
     posiciones[:, 0] = pos_x
     posiciones[:, 1] = pos_y
     return spines, posiciones
+
+
+
+def solid_angle_triangle(r1, r2, r3):
+    N = np.dot(r1, np.cross(r2, r3))
+    D = 1 + np.dot(r1, r2) + np.dot(r1, r3) + np.dot(r2, r3)
+    angulo_solido = 2 * np.arctan2(N, D)
+
+    return angulo_solido
+
+
+
+
+
+def energia_intercambio(lista_nodos, indice_nodo):
+    nodo = lista_nodos[indice_nodo]
+    s = nodo.spin
+    spin_vec = np.zeros_like(s)
+    vecinos = nodo.vecinos
+    E = 0
+    n_vec = np.size(vecinos, 0)
+    for i in range(n_vec):
+        indice_vec = int(vecinos[i, 0])
+        j = vecinos[i, 1]
+        spin_vec = lista_nodos[indice_vec].spin[:]
+        intercambio = j * np.dot(s, spin_vec) / 2
+        E = E + intercambio
+    
+    return E
+
+
+def energia_DMI(lista_nodos, indice_nodo):
+    nodo = lista_nodos[indice_nodo]
+    s = nodo.spin
+    spin_vec = np.zeros_like(s)
+    vecinos = nodo.vecinos
+    E = 0
+    n_vec = np.size(vecinos, 0)
+    for i in range(n_vec):
+        indice_vec = int(vecinos[i, 0])
+        D = vecinos[i, 2:5]
+        spin_vec = lista_nodos[indice_vec].spin[:]
+        DMI = np.dot(D, np.cross(s, spin_vec)) / 2
+        E = E + DMI
+
+    return E
+
+def energia_anisotropia(lista_nodos, indice_nodo, A):
+    nodo = lista_nodos[indice_nodo]
+    s = nodo.spin
+    E_anisotropia = -A * s[2] ** 2
+    
+    return E_anisotropia
+
+
+def energia_campo_externo(lista_nodos, indice_nodo, h):
+    nodo = lista_nodos[indice_nodo]
+    s = nodo.spin
+    E_campo_externo = -h * s[2]
+    
+    return E_campo_externo
+
+
+
+
+
+def energia_lista_nodos(lista_nodos, h=0, A=0):
+    n_nodos = len(lista_nodos)
+    energias = np.zeros(5)
+    E_intercambio, E_DMI, E_anisotropia, E_campo_externo = 0, 0, 0, 0
+    for i in range(n_nodos):
+        E_intercambio += energia_intercambio(lista_nodos, i)
+        E_DMI += energia_DMI(lista_nodos, i)
+        E_anisotropia += energia_anisotropia(lista_nodos, i, A)
+        E_campo_externo += energia_campo_externo(lista_nodos, i, h)
+
+    energias[1] = E_intercambio
+    energias[2] = E_DMI
+    energias[3] = E_anisotropia
+    energias[4] = E_campo_externo
+
+    energias[0] += np.sum(energias[1:5])
+
+    return energias
+
+
+
